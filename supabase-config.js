@@ -1,12 +1,9 @@
 // supabase-config.js
 // PromptHub Supabase 配置與功能整合
 
-// supabase-config.js
-// PromptHub Supabase 配置與功能整合
-
 // 🔑 Supabase 配置 - 請替換為你的實際金鑰
-const SUPABASE_URL = 'https://vgipyxmrjnhbthnssapz.supabase.co';
-const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZnaXB5eG1yam5oYnRobnNzYXB6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTYzMDYxODAsImV4cCI6MjA3MTg4MjE4MH0.y1zhmd0VQtTS9xiRiJ4LQAXKuNgRJupNyVGlS1e1eVg';
+const SUPABASE_URL = 'https://vqjyxmrjnhbthnsapz.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZxanl4bXJqbmhidGhuc2FweiIsInJvbGUiOiJhbm9uIiwiaWF0IjoxNzMzMTEzMzQwLCJleHAiOjIwNDg2ODkzNDB9.y1zhmd9VQtTS9xiRiJ4LQAXKuNgRJupNyVGlS1e1eVg';
 
 // 🌐 動態載入 Supabase 客戶端
 let supabaseClient = null;
@@ -444,9 +441,3 @@ document.addEventListener('DOMContentLoaded', async () => {
 });
 
 console.log('📦 PromptHub Supabase 配置載入完成');
-
-// 🔑 Supabase 配置 - 請替換為你的實際金鑰
-const SUPABASE_URL = 'https://vgipyxmrjnhbthnssapz.supabase.co';
-const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZnaXB5eG1yam5oYnRobnNzYXB6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTYzMDYxODAsImV4cCI6MjA3MTg4MjE4MH0.y1zhmd0VQtTS9xiRiJ4LQAXKuNgRJupNyVGlS1e1eVg';
-
-// 其餘完整代碼...
