@@ -1,4 +1,1105 @@
-<!DOCTYPE html>
+<div style="text-align: center; margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--border-color); color: #666; font-size: 0.9rem;">
+                🔒 你的資料將安全地儲存在雲端，並在所有裝置間同步
+            </div>
+        </div>
+    </div>
+
+    <!-- Add/Edit Prompt Modal -->
+    <div class="modal" id="promptModal">
+        <div class="modal-content" style="max-width: 600px;">
+            <div class="modal-header">
+                <h2 class="modal-title" id="promptModalTitle">新增 Prompt</h2>
+                <button class="close-btn" onclick="closePromptModal()">&times;</button>
+            </div>
+            
+            <form id="promptForm">
+                <div class="form-group">
+                    <label class="form-label">標題 *</label>
+                    <input type="text" class="form-input" id="promptTitle" required placeholder="為你的 Prompt 取個好名字">
+                </div>
+                
+                <div class="form-group">
+                    <label class="form-label">Prompt 內容 *</label>
+                    <textarea class="form-textarea" id="promptContent" required placeholder="請輸入你的 prompt 內容...
+
+範例：
+你是一個專業的{角色}。請根據以下資訊：
+
+輸入：{輸入內容}
+目標：{預期目標}
+
+要求：
+- 要求1
+- 要求2
+- 要求3
+
+請提供詳細且實用的回答。" style="min-height: 200px;"></textarea>
+                    <div style="font-size: 0.8rem; color: #666; margin-top: 0.5rem;">
+                        💡 使用 {變數名稱} 來標記可替換的部分
+                    </div>
+                </div>
+                
+                <div class="form-group">
+                    <label class="form-label">描述</label>
+                    <textarea class="form-input" id="promptDescription" placeholder="簡短描述這個 prompt 的用途、適用場景..." rows="3"></textarea>
+                </div>
+                
+                <div class="form-group">
+                    <label class="form-label">標籤（用空格分隔）</label>
+                    <input type="text" class="form-input" id="promptTags" placeholder="例如：工作 創作 寫作 行銷">
+                </div>
+                
+                <div class="form-group">
+                    <label class="form-label">分類</label>
+                    <select class="form-select" id="promptCategory">
+                        <option value="work">💼 工作</option>
+                        <option value="creative">🎨 創作</option>
+                        <option value="learning">📚 學習</option>
+                        <option value="other">📂 其他</option>
+                    </select>
+                </div>
+                
+                <div class="form-group">
+                    <div class="form-checkbox-group">
+                        <input type="checkbox" class="form-checkbox" id="promptPublic">
+                        <label for="promptPublic">🌐 設為公開（其他使用者可以看到和使用）</label>
+                    </div>
+                </div>
+                
+                <div class="form-actions">
+                    <button type="button" class="btn btn-secondary" onclick="closePromptModal()">取消</button>
+                    <button type="button" class="btn" onclick="saveDraft()" id="draftBtn">💾 儲存草稿</button>
+                    <button type="submit" class="btn btn-success" id="promptSubmitBtn">
+                        <span class="loading" style="display: none;"></span>
+                        儲存
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Floating Action Button -->
+    <button class="fab" onclick="showPromptModal()" title="快速新增 Prompt (Ctrl+N)" id="fabBtn">
+        ➕
+    </button>
+
+    <!-- Bottom Navigation -->
+    <nav class="bottom-nav">
+        <a href="#" class="nav-item active" data-page="home">
+            <div class="nav-icon">🏠</div>
+            <div>首頁</div>
+        </a>
+        <a href="#" class="nav-item" data-page="explore">
+            <div class="nav-icon">🔍</div>
+            <div>探索</div>
+        </a>
+        <a href="#" class="nav-item" data-page="favorites">
+            <div class="nav-icon">❤️</div>
+            <div>收藏</div>
+        </a>
+        <a href="#" class="nav-item" data-page="profile">
+            <div class="nav-icon">👤</div>
+            <div>我的</div>
+        </a>
+    </nav>
+
+    <!-- Notification -->
+    <div class="notification" id="notification"></div>
+
+    <!-- Load Supabase Config -->
+    <script src="supabase-config.js"></script>
+
+    <script>
+        // Application State
+        let currentUser = null;
+        let currentEditId = null;
+        let prompts = [];
+        let isOnline = navigator.onLine;
+        let syncInProgress = false;
+
+        // PromptHub Application Class
+        class PromptHubApp {
+            constructor() {
+                this.init();
+            }
+
+            async init() {
+                try {
+                    console.log('🚀 PromptHub 初始化中...');
+                    
+                    // 初始化 Supabase
+                    const supabaseReady = await window.PromptHubSupabase.init();
+                    if (!supabaseReady) {
+                        throw new Error('Supabase 初始化失敗');
+                    }
+
+                    // 設定認證狀態監聽
+                    window.PromptHubSupabase.auth.onAuthStateChange((event, session) => {
+                        this.handleAuthStateChange(event, session);
+                    });
+
+                    // 檢查當前用戶
+                    await this.checkCurrentUser();
+
+                    // 設定事件監聽器
+                    this.setupEventListeners();
+
+                    // 載入初始資料
+                    await this.loadInitialData();
+
+                    // 更新 UI
+                    this.updateUI();
+
+                    // 設定網路狀態監聽
+                    window.addEventListener('online', () => this.handleNetworkChange(true));
+                    window.addEventListener('offline', () => this.handleNetworkChange(false));
+
+                    console.log('✅ PromptHub 初始化完成');
+                    this.showNotification('PromptHub 已就緒！', 'success');
+
+                } catch (error) {
+                    console.error('❌ PromptHub 初始化失敗:', error);
+                    this.showNotification('初始化失敗，將使用離線模式', 'warning');
+                    this.loadLocalData();
+                }
+            }
+
+            async checkCurrentUser() {
+                try {
+                    const result = await window.PromptHubSupabase.auth.getCurrentUser();
+                    if (result.success && result.user) {
+                        currentUser = result.user;
+                        console.log('✅ 用戶已登入:', currentUser.email);
+                    } else {
+                        currentUser = null;
+                        console.log('👤 用戶未登入');
+                    }
+                } catch (error) {
+                    console.error('檢查用戶狀態失敗:', error);
+                    currentUser = null;
+                }
+            }
+
+            handleAuthStateChange(event, session) {
+                console.log('🔄 認證狀態變化:', event);
+                
+                if (event === 'SIGNED_IN' && session?.user) {
+                    currentUser = session.user;
+                    this.showNotification('登入成功！', 'success');
+                    this.closeAuthModal();
+                    this.loadUserData();
+                    this.migrateLocalDataIfNeeded();
+                } else if (event === 'SIGNED_OUT') {
+                    currentUser = null;
+                    this.showNotification('已登出', 'success');
+                    prompts = [];
+                    this.loadLocalData();
+                }
+                
+                this.updateUI();
+            }
+
+            async loadInitialData() {
+                if (currentUser) {
+                    await this.loadUserData();
+                } else {
+                    this.loadLocalData();
+                }
+            }
+
+            async loadUserData() {
+                try {
+                    this.updateSyncStatus('syncing', '同步中...');
+                    
+                    // 載入用戶的 prompts 和公開 prompts
+                    const [userResult, publicResult] = await Promise.all([
+                        window.PromptHubSupabase.prompts.getUserPrompts(currentUser.id),
+                        window.PromptHubSupabase.prompts.getPublicPrompts(20)
+                    ]);
+
+                    if (userResult.success && publicResult.success) {
+                        // 合併用戶 prompts 和公開 prompts，避免重複
+                        const userPrompts = userResult.data || [];
+                        const publicPrompts = (publicResult.data || []).filter(p => 
+                            p.user_id !== currentUser.id
+                        );
+                        
+                        prompts = [...userPrompts, ...publicPrompts];
+                        
+                        console.log(`✅ 載入了 ${userPrompts.length} 個用戶 Prompts 和 ${publicPrompts.length} 個公開 Prompts`);
+                        this.updateSyncStatus('synced', '已同步');
+                    } else {
+                        throw new Error('載入資料失敗');
+                    }
+                } catch (error) {
+                    console.error('❌ 載入用戶資料失敗:', error);
+                    this.updateSyncStatus('error', '同步失敗');
+                    this.loadLocalData(); // 降級到本地資料
+                }
+                
+                this.renderPrompts();
+            }
+
+            loadLocalData() {
+                try {
+                    const localData = localStorage.getItem('prompthub_prompts');
+                    if (localData) {
+                        const localPrompts = JSON.parse(localData);
+                        prompts = Array.isArray(localPrompts) ? localPrompts : [];
+                        console.log(`📱 載入了 ${prompts.length} 個本地 Prompts`);
+                    } else {
+                        prompts = [];
+                    }
+                    this.updateSyncStatus('offline', '離線模式');
+                } catch (error) {
+                    console.error('載入本地資料失敗:', error);
+                    prompts = [];
+                }
+                
+                this.renderPrompts();
+            }
+
+            async migrateLocalDataIfNeeded() {
+                try {
+                    const result = await window.PromptHubSupabase.migration.migrateLocalData();
+                    if (result.success && result.migrated > 0) {
+                        this.showNotification(`已將 ${result.migrated} 個本地 Prompts 同步到雲端`, 'success');
+                        await this.loadUserData();
+                    }
+                } catch (error) {
+                    console.error('資料遷移失敗:', error);
+                }
+            }
+
+            setupEventListeners() {
+                // 搜尋功能
+                const searchInput = document.getElementById('searchInput');
+                let searchTimeout;
+                searchInput.addEventListener('input', (e) => {
+                    clearTimeout(searchTimeout);
+                    searchTimeout = setTimeout(() => {
+                        this.handleSearch(e.target.value);
+                    }, 300);
+                });
+
+                // 篩選功能
+                document.querySelectorAll('.filter-tag').forEach(tag => {
+                    tag.addEventListener('click', (e) => this.handleFilter(e));
+                });
+
+                // 表單提交
+                document.getElementById('loginForm').addEventListener('submit', (e) => {
+                    e.preventDefault();
+                    this.handleLogin();
+                });
+
+                document.getElementById('registerForm').addEventListener('submit', (e) => {
+                    e.preventDefault();
+                    this.handleRegister();
+                });
+
+                document.getElementById('promptForm').addEventListener('submit', (e) => {
+                    e.preventDefault();
+                    this.handlePromptSubmit();
+                });
+
+                // 鍵盤快捷鍵
+                document.addEventListener('keydown', (e) => this.handleKeyboard(e));
+
+                // 底部導航
+                document.querySelectorAll('.nav-item').forEach(item => {
+                    item.addEventListener('click', (e) => this.handleNavigation(e));
+                });
+
+                // 模態框外部點擊關閉
+                document.querySelectorAll('.modal').forEach(modal => {
+                    modal.addEventListener('click', (e) => {
+                        if (e.target === modal) {
+                            this.closeModal(modal.id);
+                        }
+                    });
+                });
+            }
+
+            async handleLogin() {
+                const email = document.getElementById('loginEmail').value;
+                const password = document.getElementById('loginPassword').value;
+                const submitBtn = document.getElementById('loginSubmitBtn');
+                const loading = submitBtn.querySelector('.loading');
+
+                if (!email || !password) {
+                    this.showNotification('請填寫所有欄位', 'error');
+                    return;
+                }
+
+                try {
+                    submitBtn.disabled = true;
+                    loading.style.display = 'inline-block';
+
+                    const result = await window.PromptHubSupabase.auth.signIn(email, password);
+                    
+                    if (!result.success) {
+                        throw new Error(result.error?.message || '登入失敗');
+                    }
+
+                    // 成功處理在 handleAuthStateChange 中
+                } catch (error) {
+                    console.error('登入失敗:', error);
+                    this.showNotification('登入失敗: ' + error.message, 'error');
+                } finally {
+                    submitBtn.disabled = false;
+                    loading.style.display = 'none';
+                }
+            }
+
+            async handleRegister() {
+                const email = document.getElementById('registerEmail').value;
+                const username = document.getElementById('registerUsername').value;
+                const password = document.getElementById('registerPassword').value;
+                const passwordConfirm = document.getElementById('registerPasswordConfirm').value;
+                const agreeTerms = document.getElementById('agreeTerms').checked;
+
+                const submitBtn = document.getElementById('registerSubmitBtn');
+                const loading = submitBtn.querySelector('.loading');
+
+                // 驗證輸入
+                if (!email || !username || !password || !passwordConfirm) {
+                    this.showNotification('請填寫所有欄位', 'error');
+                    return;
+                }
+
+                if (password !== passwordConfirm) {
+                    this.showNotification('密碼確認不一致', 'error');
+                    return;
+                }
+
+                if (password.length < 8) {
+                    this.showNotification('密碼至少需要 8 個字符', 'error');
+                    return;
+                }
+
+                if (!agreeTerms) {
+                    this.showNotification('請同意服務條款', 'error');
+                    return;
+                }
+
+                try {
+                    submitBtn.disabled = true;
+                    loading.style.display = 'inline-block';
+
+                    const result = await window.PromptHubSupabase.auth.signUp(email, password, {
+                        username: username
+                    });
+                    
+                    if (!result.success) {
+                        throw new Error(result.error?.message || '註冊失敗');
+                    }
+
+                    this.showNotification('註冊成功！請檢查郵件進行驗證', 'success');
+                    this.switchAuthTab('login');
+                    
+                } catch (error) {
+                    console.error('註冊失敗:', error);
+                    this.showNotification('註冊失敗: ' + error.message, 'error');
+                } finally {
+                    submitBtn.disabled = false;
+                    loading.style.display = 'none';
+                }
+            }
+
+            async handlePromptSubmit() {
+                const title = document.getElementById('promptTitle').value;
+                const content = document.getElementById('promptContent').value;
+                const description = document.getElementById('promptDescription').value;
+                const tags = document.getElementById('promptTags').value
+                    .split(/\s+/)
+                    .map(tag => tag.trim())
+                    .filter(tag => tag);
+                const category = document.getElementById('promptCategory').value;
+                const isPublic = document.getElementById('promptPublic').checked;
+
+                const submitBtn = document.getElementById('promptSubmitBtn');
+                const loading = submitBtn.querySelector('.loading');
+
+                if (!title || !content) {
+                    this.showNotification('請填寫標題和內容', 'error');
+                    return;
+                }
+
+                try {
+                    submitBtn.disabled = true;
+                    loading.style.display = 'inline-block';
+
+                    const promptData = {
+                        title,
+                        content,
+                        description,
+                        category,
+                        tags,
+                        isPublic
+                    };
+
+                    if (currentEditId) {
+                        await this.updatePrompt(currentEditId, promptData);
+                    } else {
+                        await this.createPrompt(promptData);
+                    }
+
+                    this.closePromptModal();
+                    this.clearDraft();
+
+                } catch (error) {
+                    console.error('儲存 Prompt 失敗:', error);
+                    this.showNotification('儲存失敗，請重試', 'error');
+                } finally {
+                    submitBtn.disabled = false;
+                    loading.style.display = 'none';
+                }
+            }
+
+            async createPrompt(promptData) {
+                if (currentUser) {
+                    // 儲存到雲端
+                    const result = await window.PromptHubSupabase.prompts.createPrompt(promptData);
+                    if (result.success) {
+                        prompts.unshift(this.formatPrompt(result.data));
+                        this.showNotification('✨ Prompt 已儲存到雲端！', 'success');
+                    } else {
+                        throw new Error(result.error?.message || '儲存到雲端失敗');
+                    }
+                } else {
+                    // 儲存到本地
+                    const newPrompt = {
+                        id: Date.now().toString(),
+                        ...promptData,
+                        user_id: 'local',
+                        likes_count: 0,
+                        views_count: 0,
+                        bookmarks_count: 0,
+                        created_at: new Date().toISOString(),
+                        updated_at: new Date().toISOString(),
+                    };
+
+                    prompts.unshift(newPrompt);
+                    this.saveLocalData();
+                    this.showNotification('✨ Prompt 已儲存到本地！', 'success');
+                }
+
+                this.renderPrompts();
+            }
+
+            async updatePrompt(id, updates) {
+                if (currentUser) {
+                    const result = await window.PromptHubSupabase.prompts.updatePrompt(id, updates);
+                    if (result.success) {
+                        const index = prompts.findIndex(p => p.id === id);
+                        if (index !== -1) {
+                            prompts[index] = this.formatPrompt(result.data);
+                        }
+                        this.showNotification('📝 Prompt 已更新！', 'success');
+                    } else {
+                        throw new Error(result.error?.message || '更新失敗');
+                    }
+                } else {
+                    const index = prompts.findIndex(p => p.id === id);
+                    if (index !== -1) {
+                        prompts[index] = {
+                            ...prompts[index],
+                            ...updates,
+                            updated_at: new Date().toISOString()
+                        };
+                        this.saveLocalData();
+                        this.showNotification('📝 Prompt 已更新！', 'success');
+                    }
+                }
+
+                this.renderPrompts();
+            }
+
+            formatPrompt(rawPrompt) {
+                return {
+                    ...rawPrompt,
+                    isPublic: rawPrompt.is_public,
+                    tags: Array.isArray(rawPrompt.tags) ? rawPrompt.tags : [],
+                    author: rawPrompt.user_id === currentUser?.id ? '我' : (rawPrompt.author || '用戶'),
+                    authorAvatar: rawPrompt.user_id === currentUser?.id ? (currentUser.email?.[0]?.toUpperCase() || '我') : '👤'
+                };
+            }
+
+            saveLocalData() {
+                try {
+                    localStorage.setItem('prompthub_prompts', JSON.stringify(prompts));
+                } catch (error) {
+                    console.error('儲存本地資料失敗:', error);
+                }
+            }
+
+            renderPrompts(filteredPrompts = prompts) {
+                const grid = document.getElementById('promptGrid');
+                grid.innerHTML = '';
+
+                if (filteredPrompts.length === 0) {
+                    grid.innerHTML = this.createEmptyState();
+                    return;
+                }
+
+                filteredPrompts
+                    .sort((a, b) => new Date(b.updated_at || b.created_at) - new Date(a.updated_at || a.created_at))
+                    .forEach(prompt => {
+                        const card = this.createPromptCard(prompt);
+                        grid.appendChild(card);
+                    });
+            }
+
+            createEmptyState() {
+                const isUserLoggedIn = !!currentUser;
+                const message = isUserLoggedIn 
+                    ? '還沒有 Prompts，創建第一個吧！' 
+                    : '登入後開始管理你的 AI Prompts';
+                
+                return `
+                    <div class="empty-state">
+                        <div class="empty-state-icon">${isUserLoggedIn ? '📝' : '🔐'}</div>
+                        <h3>${message}</h3>
+                        <p>PromptHub 幫助你有效管理和分享 AI 提示詞</p>
+                        <button class="btn btn-primary" onclick="${isUserLoggedIn ? 'app.showPromptModal()' : 'app.showAuthModal()'}" style="margin-top: 1rem; background: var(--primary-gradient);">
+                            ${isUserLoggedIn ? '➕ 創建 Prompt' : '👤 立即登入'}
+                        </button>
+                    </div>
+                `;
+            }
+
+            createPromptCard(prompt) {
+                const card = document.createElement('div');
+                card.className = 'prompt-card';
+                
+                const isOwner = currentUser && (prompt.user_id === currentUser.id || prompt.user_id === 'local');
+                const syncStatus = prompt.user_id === 'local' ? 'local' : 'synced';
+                
+                card.innerHTML = `
+                    <div class="card-header">
+                        <div style="flex: 1;">
+                            <div class="card-title">${this.escapeHtml(prompt.title)}</div>
+                            <div class="card-meta">
+                                <span class="meta-tag ${prompt.isPublic || prompt.is_public ? 'meta-public' : 'meta-private'}">
+                                    ${prompt.isPublic || prompt.is_public ? '🌐 公開' : '🔒 私人'}
+                                </span>
+                                <span class="meta-tag meta-${syncStatus}">
+                                    ${syncStatus === 'local' ? '📱 本地' : '☁️ 雲端'}
+                                </span>
+                                <span class="meta-tag" style="background: #f0f0f0; color: #666;">
+                                    ${this.getCategoryName(prompt.category)}
+                                </span>
+                            </div>
+                            <div class="card-author">
+                                <div class="author-avatar">${prompt.authorAvatar || prompt.author?.[0] || '👤'}</div>
+                                <span>${prompt.author || '匿名用戶'}</span>
+                                <span>•</span>
+                                <span>${this.formatDate(prompt.updated_at || prompt.created_at)}</span>
+                            </div>
+                        </div>
+                        ${isOwner ? `
+                            <div>
+                                <button class="action-btn" onclick="app.editPrompt('${prompt.id}')" title="編輯">
+                                    ✏️
+                                </button>
+                            </div>
+                        ` : ''}
+                    </div>
+                    
+                    <div class="card-content">
+                        <div class="prompt-preview" onclick="app.expandPrompt('${prompt.id}')">${this.escapeHtml(this.truncateText(prompt.content, 200))}</div>
+                        ${prompt.description ? `<p class="card-description">${this.escapeHtml(prompt.description)}</p>` : ''}
+                        ${prompt.tags && prompt.tags.length > 0 ? `
+                            <div class="card-tags">
+                                ${prompt.tags.map(tag => `<span class="tag" onclick="app.searchByTag('${this.escapeHtml(tag)}')">#${this.escapeHtml(tag)}</span>`).join('')}
+                            </div>
+                        ` : ''}
+                    </div>
+                    
+                    <div class="card-actions">
+                        <div class="action-left">
+                            <button class="action-btn" onclick="app.copyPrompt('${prompt.id}')">
+                                📋 複製
+                            </button>
+                            <button class="action-btn" onclick="app.sharePrompt('${prompt.id}')">
+                                📤 分享
+                            </button>
+                        </div>
+                        <div class="action-right">
+                            <span class="action-btn" style="cursor: default;">
+                                👁️ ${prompt.views_count || 0}
+                            </span>
+                        </div>
+                    </div>
+                `;
+                
+                return card;
+            }
+
+            // Utility methods
+            escapeHtml(unsafe) {
+                return unsafe
+                    .replace(/&/g, "&amp;")
+                    .replace(/</g, "&lt;")
+                    .replace(/>/g, "&gt;")
+                    .replace(/"/g, "&quot;")
+                    .replace(/'/g, "&#039;");
+            }
+
+            truncateText(text, maxLength) {
+                if (!text || text.length <= maxLength) return text || '';
+                return text.substring(0, maxLength) + '...';
+            }
+
+            getCategoryName(category) {
+                const categories = {
+                    work: '💼 工作',
+                    creative: '🎨 創作',
+                    learning: '📚 學習',
+                    other: '📂 其他'
+                };
+                return categories[category] || '📂 其他';
+            }
+
+            formatDate(dateString) {
+                if (!dateString) return '未知時間';
+                
+                const date = new Date(dateString);
+                const now = new Date();
+                const diff = now - date;
+                const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+                
+                if (days === 0) return '今天';
+                if (days === 1) return '昨天';
+                if (days < 7) return `${days} 天前`;
+                if (days < 30) return `${Math.floor(days / 7)} 週前`;
+                return date.toLocaleDateString('zh-TW');
+            }
+
+            // UI methods
+            updateUI() {
+                this.updateUserUI();
+                this.updateAuthRequiredState();
+                this.updateFabVisibility();
+            }
+
+            updateUserUI() {
+                const userDisplayName = document.getElementById('userDisplayName');
+                const userAvatar = document.getElementById('userAvatar');
+                const userInitial = document.getElementById('userInitial');
+                const authBtn = document.getElementById('authBtn');
+
+                if (currentUser) {
+                    const displayName = currentUser.user_metadata?.username || currentUser.email.split('@')[0];
+                    const initial = displayName[0].toUpperCase();
+                    
+                    userDisplayName.textContent = displayName;
+                    userInitial.textContent = initial;
+                    userAvatar.style.display = 'flex';
+                    authBtn.innerHTML = '🚪 登出';
+                    authBtn.onclick = () => this.handleLogout();
+                } else {
+                    userDisplayName.textContent = '訪客模式';
+                    userAvatar.style.display = 'none';
+                    authBtn.innerHTML = '👤 登入';
+                    authBtn.onclick = () => this.showAuthModal();
+                }
+            }
+
+            updateAuthRequiredState() {
+                const authRequired = document.getElementById('authRequired');
+                const searchSection = document.getElementById('searchSection');
+                
+                if (!currentUser && prompts.length === 0) {
+                    authRequired.style.display = 'block';
+                    searchSection.style.display = 'none';
+                } else {
+                    authRequired.style.display = 'none';
+                    searchSection.style.display = 'block';
+                }
+            }
+
+            updateFabVisibility() {
+                const fab = document.getElementById('fabBtn');
+                // FAB 始終顯示，未登入用戶點擊時會提示登入
+                fab.style.display = 'flex';
+            }
+
+            updateSyncStatus(status, message) {
+                const syncIndicator = document.getElementById('syncIndicator');
+                const syncStatus = document.getElementById('syncStatus');
+                
+                syncIndicator.className = `sync-indicator ${status}`;
+                syncStatus.textContent = message;
+            }
+
+            // Modal methods
+            showAuthModal() {
+                const modal = document.getElementById('authModal');
+                modal.classList.add('show');
+                document.body.style.overflow = 'hidden';
+            }
+
+            closeAuthModal() {
+                const modal = document.getElementById('authModal');
+                modal.classList.remove('show');
+                document.body.style.overflow = 'auto';
+                
+                // 清空表單
+                document.getElementById('loginForm').reset();
+                document.getElementById('registerForm').reset();
+            }
+
+            showPromptModal() {
+                if (!currentUser) {
+                    this.showAuthModal();
+                    this.showNotification('請先登入以使用完整功能', 'warning');
+                    return;
+                }
+
+                currentEditId = null;
+                document.getElementById('promptModalTitle').textContent = '新增 Prompt';
+                document.getElementById('promptForm').reset();
+                this.loadDraft();
+                
+                const modal = document.getElementById('promptModal');
+                modal.classList.add('show');
+                document.body.style.overflow = 'hidden';
+            }
+
+            closePromptModal() {
+                const modal = document.getElementById('promptModal');
+                modal.classList.remove('show');
+                document.body.style.overflow = 'auto';
+                currentEditId = null;
+            }
+
+            switchAuthTab(tabName) {
+                // 更新標籤狀態
+                document.querySelectorAll('.auth-tab').forEach(tab => {
+                    tab.classList.remove('active');
+                });
+                document.querySelector(`[onclick="switchAuthTab('${tabName}')"]`).classList.add('active');
+
+                // 切換表單
+                document.querySelectorAll('.auth-form').forEach(form => {
+                    form.classList.remove('active');
+                });
+                document.getElementById(`${tabName}Form`).classList.add('active');
+            }
+
+            // Event handlers
+            handleSearch(query) {
+                if (!query.trim()) {
+                    this.renderPrompts();
+                    return;
+                }
+
+                const filtered = prompts.filter(prompt => 
+                    prompt.title.toLowerCase().includes(query.toLowerCase()) ||
+                    prompt.content.toLowerCase().includes(query.toLowerCase()) ||
+                    (prompt.description || '').toLowerCase().includes(query.toLowerCase()) ||
+                    (prompt.tags || []).some(tag => tag.toLowerCase().includes(query.toLowerCase()))
+                );
+                
+                this.renderPrompts(filtered);
+                console.log(`🔍 搜尋 "${query}" 找到 ${filtered.length} 個結果`);
+            }
+
+            handleFilter(e) {
+                document.querySelectorAll('.filter-tag').forEach(tag => tag.classList.remove('active'));
+                e.target.classList.add('active');
+                
+                const filter = e.target.dataset.filter;
+                let filtered = prompts;
+                
+                switch (filter) {
+                    case 'all':
+                        filtered = prompts;
+                        break;
+                    case 'public':
+                        filtered = prompts.filter(p => p.isPublic || p.is_public);
+                        break;
+                    case 'private':
+                        filtered = prompts.filter(p => !(p.isPublic || p.is_public));
+                        break;
+                    default:
+                        filtered = prompts.filter(p => p.category === filter);
+                }
+                
+                this.renderPrompts(filtered);
+                console.log(`📂 篩選 "${filter}" 顯示 ${filtered.length} 個 Prompts`);
+            }
+
+            handleKeyboard(e) {
+                // Ctrl/Cmd + K: 快速搜尋
+                if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+                    e.preventDefault();
+                    document.getElementById('searchInput').focus();
+                    this.showNotification('快速搜尋已啟動 🔍');
+                }
+                
+                // Ctrl/Cmd + N: 新增 Prompt
+                if ((e.ctrlKey || e.metaKey) && e.key === 'n') {
+                    e.preventDefault();
+                    this.showPromptModal();
+                }
+                
+                // Escape: 關閉模態框
+                if (e.key === 'Escape') {
+                    this.closeAllModals();
+                }
+            }
+
+            handleNavigation(e) {
+                e.preventDefault();
+                
+                document.querySelectorAll('.nav-item').forEach(nav => nav.classList.remove('active'));
+                e.currentTarget.classList.add('active');
+                
+                const page = e.currentTarget.dataset.page;
+                
+                switch (page) {
+                    case 'home':
+                        this.renderPrompts();
+                        this.showNotification('首頁 🏠');
+                        break;
+                    case 'explore':
+                        const publicPrompts = prompts.filter(p => p.isPublic || p.is_public);
+                        this.renderPrompts(publicPrompts);
+                        this.showNotification('探索公開 Prompts 🔍');
+                        break;
+                    case 'favorites':
+                        const favoritePrompts = prompts.filter(p => p.bookmarked || p.liked);
+                        this.renderPrompts(favoritePrompts);
+                        this.showNotification('我的收藏 ❤️');
+                        break;
+                    case 'profile':
+                        if (currentUser) {
+                            const userPrompts = prompts.filter(p => 
+                                p.user_id === currentUser.id || p.user_id === 'local'
+                            );
+                            this.renderPrompts(userPrompts);
+                            this.showNotification('我的 Prompts 👤');
+                        } else {
+                            this.showAuthModal();
+                            this.showNotification('請先登入', 'warning');
+                        }
+                        break;
+                }
+            }
+
+            handleNetworkChange(online) {
+                isOnline = online;
+                
+                if (online) {
+                    this.showNotification('已重新連線', 'success');
+                    if (currentUser) {
+                        this.loadUserData();
+                    }
+                } else {
+                    this.updateSyncStatus('offline', '離線模式');
+                    this.showNotification('目前離線，資料將暫存本地', 'warning');
+                }
+            }
+
+            async handleLogout() {
+                if (confirm('確定要登出嗎？')) {
+                    try {
+                        await window.PromptHubSupabase.auth.signOut();
+                    } catch (error) {
+                        console.error('登出失敗:', error);
+                        this.showNotification('登出失敗', 'error');
+                    }
+                }
+            }
+
+            // Prompt actions
+            editPrompt(id) {
+                const prompt = prompts.find(p => p.id === id);
+                if (!prompt) return;
+
+                // 檢查權限
+                if (!currentUser || (prompt.user_id !== currentUser.id && prompt.user_id !== 'local')) {
+                    this.showNotification('只能編輯自己的 Prompts', 'error');
+                    return;
+                }
+
+                currentEditId = id;
+                document.getElementById('promptModalTitle').textContent = '編輯 Prompt';
+                document.getElementById('promptTitle').value = prompt.title;
+                document.getElementById('promptContent').value = prompt.content;
+                document.getElementById('promptDescription').value = prompt.description || '';
+                document.getElementById('promptTags').value = (prompt.tags || []).join(' ');
+                document.getElementById('promptCategory').value = prompt.category || 'other';
+                document.getElementById('promptPublic').checked = prompt.isPublic || prompt.is_public || false;
+                
+                const modal = document.getElementById('promptModal');
+                modal.classList.add('show');
+                document.body.style.overflow = 'hidden';
+            }
+
+            copyPrompt(id) {
+                const prompt = prompts.find(p => p.id === id);
+                if (prompt) {
+                    navigator.clipboard.writeText(prompt.content).then(() => {
+                        this.showNotification('📋 Prompt 已複製到剪貼板！', 'success');
+                    }).catch(() => {
+                        this.showNotification('複製失敗，請手動選取', 'error');
+                    });
+                }
+            }
+
+            sharePrompt(id) {
+                const prompt = prompts.find(p => p.id === id);
+                if (prompt) {
+                    const shareData = {
+                        title: `PromptHub - ${prompt.title}`,
+                        text: prompt.description || '查看這個實用的 AI Prompt',
+                        url: window.location.href
+                    };
+                    
+                    if (navigator.share) {
+                        navigator.share(shareData);
+                    } else {
+                        const shareText = `${prompt.title}\n\n${prompt.description || ''}\n\n查看更多：${shareData.url}`;
+                        navigator.clipboard.writeText(shareText);
+                        this.showNotification('📤 分享連結已複製！', 'success');
+                    }
+                }
+            }
+
+            expandPrompt(id) {
+                const prompt = prompts.find(p => p.id === id);
+                if (prompt) {
+                    // 簡單展開功能，顯示完整內容
+                    alert(`${prompt.title}\n\n${prompt.content}`);
+                }
+            }
+
+            searchByTag(tag) {
+                document.getElementById('searchInput').value = tag;
+                this.handleSearch(tag);
+            }
+
+            // Draft management
+            saveDraft() {
+                const formData = {
+                    title: document.getElementById('promptTitle').value,
+                    content: document.getElementById('promptContent').value,
+                    description: document.getElementById('promptDescription').value,
+                    tags: document.getElementById('promptTags').value,
+                    category: document.getElementById('promptCategory').value,
+                    isPublic: document.getElementById('promptPublic').checked
+                };
+                
+                if (Object.values(formData).some(value => value && value.toString().trim())) {
+                    localStorage.setItem('prompthub_draft', JSON.stringify(formData));
+                    this.showNotification('💾 草稿已儲存');
+                }
+            }
+
+            loadDraft() {
+                const draft = localStorage.getItem('prompthub_draft');
+                if (draft && !currentEditId) {
+                    const formData = JSON.parse(draft);
+                    if (confirm('發現未完成的草稿，是否要載入？')) {
+                        document.getElementById('promptTitle').value = formData.title || '';
+                        document.getElementById('promptContent').value = formData.content || '';
+                        document.getElementById('promptDescription').value = formData.description || '';
+                        document.getElementById('promptTags').value = formData.tags || '';
+                        document.getElementById('promptCategory').value = formData.category || 'other';
+                        document.getElementById('promptPublic').checked = formData.isPublic || false;
+                    }
+                }
+            }
+
+            clearDraft() {
+                localStorage.removeItem('prompthub_draft');
+            }
+
+            // Utility methods
+            closeAllModals() {
+                document.querySelectorAll('.modal').forEach(modal => {
+                    modal.classList.remove('show');
+                });
+                document.body.style.overflow = 'auto';
+                currentEditId = null;
+            }
+
+            closeModal(modalId) {
+                const modal = document.getElementById(modalId);
+                modal.classList.remove('show');
+                document.body.style.overflow = 'auto';
+                
+                if (modalId === 'promptModal') {
+                    currentEditId = null;
+                }
+            }
+
+            showNotification(message, type = 'default') {
+                const notification = document.getElementById('notification');
+                notification.textContent = message;
+                notification.className = `notification ${type}`;
+                notification.classList.add('show');
+                
+                setTimeout(() => {
+                    notification.classList.remove('show');
+                }, 3000);
+            }
+        }
+
+        // Global functions for HTML onclick handlers
+        let app;
+
+        // 初始化應用程式
+        document.addEventListener('DOMContentLoaded', function() {
+            app = new PromptHubApp();
+            
+            // 自動儲存草稿
+            ['promptTitle', 'promptContent', 'promptDescription', 'promptTags'].forEach(id => {
+                const element = document.getElementById(id);
+                if (element) {
+                    element.addEventListener('input', () => {
+                        clearTimeout(element.draftTimer);
+                        element.draftTimer = setTimeout(() => app.saveDraft(), 2000);
+                    });
+                }
+            });
+        });
+
+        // Global helper functions
+        function toggleAuth() { app.toggleAuth(); }
+        function showAuthModal() { app.showAuthModal(); }
+        function closeAuthModal() { app.closeAuthModal(); }
+        function showPromptModal() { app.showPromptModal(); }
+        function closePromptModal() { app.closePromptModal(); }
+        function switchAuthTab(tab) { app.switchAuthTab(tab); }
+        function showForgotPassword() { 
+            app.showNotification('密碼重設功能開發中...', 'warning'); 
+        }
+        function saveDraft() { app.saveDraft(); }
+
+        // 錯誤處理
+        window.addEventListener('error', (event) => {
+            console.error('全域錯誤:', event.error);
+            if (app) {
+                app.showNotification('發生錯誤，請重新整理頁面', 'error');
+            }
+        });
+
+        window.addEventListener('unhandledrejection', (event) => {
+            console.error('未處理的 Promise 錯誤:', event.reason);
+            if (app) {
+                app.showNotification('網路錯誤，請檢查連線', 'error');
+            }
+        });
+
+        console.log('🚀 PromptHub 已準備就緒！');
+    </script>
+</body>
+</html><!DOCTYPE html>
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
@@ -8,9 +1109,7 @@
     <!-- PWA Meta tags -->
     <meta name="description" content="專業的 AI Prompt 管理平台，支援雲端同步、社群分享">
     <meta name="theme-color" content="#667eea">
-    <link rel="manifest" href="data:application/json;base64,ewogICJuYW1lIjogIlByb21wdEh1YiAtIEFJIFByb21wdCDnrqHnkIblubPlj7AiLAogICJzaG9ydF9uYW1lIjogIlByb21wdEh1YiIsCiAgImRlc2NyaXB0aW9uIjogIuWwiualreaWh+eahCBBSSBQcm9tcHQg566h55CG5bmz5Y+wIiwKICAiaWNvbnMiOiBbCiAgICB7CiAgICAgICJzcmMiOiAiZGF0YTppbWFnZS9zdmcreG1sO2Jhc2U2NCxQSE4yWnlCM2FXUjBhRDBpTVRJNElpQm9aV2xuYUhROUlqRXlPQ0lpSUdacGJHdzlJaU01TmpkbFpXRWlJSGh0Ykc1elBTSm9kSFJ3T2k4dmQzZDNMbmN6TG05eVp5OHlNREF3TDNOMlp5SStQSEpsWTNRZ2VEMGlNalFpSUhrOUlqSTBJaUIzYVdSMGFEMGlPREFpSUdobGFXZG9kRDBpT0RBaUlHWnBiR3c5SWk5bU5qa3JJaTgrUEhSbGVIUWdlRDBpTmpRaUlIazlJall3SWlCbWFXeHNQU0oxYUdsdFpTSWdabTl1ZEMxemFYcGxQU0l4TkNJK1VISnZiWEIwUEM5MFpYaDBQand2YzNabktnPT0iLAogICAgICAic2l6ZXMiOiAiMTI4eDEyOCIsCiAgICAgICJ0eXBlIjogImltYWdlL3N2Zyt4bWwiCiAgICB9CiAgXSwKICAic3RhcnRfdXJsIjogIi4vIiwKICAiZGlzcGxheSI6ICJzdGFuZGFsb25lIiwKICAiYmFja2dyb3VuZF9jb2xvciI6ICIjZjhmOWZhIiwKICAidGhlbWVfY29sb3IiOiAiIzY2N2VlYSIKfQ==">
-    <link rel="apple-touch-icon" href="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTI4IiBoZWlnaHQ9IjEyOCIgZmlsbD0iIzY2N2VlYSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB4PSIyNCIgeT0iMjQiIHdpZHRoPSI4MCIgaGVpZ2h0PSI4MCIgZmlsbD0iIzY2OWUrIi8+PHRleHQgeD0iNjQiIHk9IjYwIiBmaWxsPSJ3aGl0ZSIgZm9udC1zaXplPSIxNCI+UHJvbXB0PC90ZXh0Pjwvc3ZnPg==">
-
+    
     <style>
         :root {
             --primary-color: #667eea;
@@ -66,11 +1165,17 @@
             gap: 0.5rem;
         }
 
-        .user-status {
+        .user-info {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            font-size: 0.9rem;
+        }
+
+        .sync-status {
             display: flex;
             align-items: center;
             gap: 0.5rem;
-            font-size: 0.9rem;
         }
 
         .sync-indicator {
@@ -85,14 +1190,28 @@
             background: #ff9800;
         }
 
-        .sync-indicator.offline {
+        .sync-indicator.error {
             background: #f44336;
         }
 
+        .sync-indicator.offline {
+            background: #9e9e9e;
+        }
+
         @keyframes pulse {
-            0% { opacity: 1; }
+            0%, 100% { opacity: 1; }
             50% { opacity: 0.5; }
-            100% { opacity: 1; }
+        }
+
+        .user-avatar {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            background: rgba(255,255,255,0.2);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
         }
 
         /* Button Styles */
@@ -107,6 +1226,7 @@
             align-items: center;
             gap: 0.5rem;
             font-family: inherit;
+            text-decoration: none;
         }
 
         .btn-primary {
@@ -140,15 +1260,53 @@
             box-shadow: var(--shadow-medium);
         }
 
+        .btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        /* Loading States */
+        .loading {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 2px solid rgba(255,255,255,0.3);
+            border-radius: 50%;
+            border-top-color: white;
+            animation: spin 1s ease-in-out infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
         /* Container and Layout */
         .container {
             max-width: 1200px;
             margin: 0 auto;
             padding: 1rem;
+            min-height: calc(100vh - 200px);
         }
 
-        .main-content {
-            min-height: calc(100vh - 200px);
+        /* Auth States */
+        .auth-required {
+            text-align: center;
+            padding: 4rem 2rem;
+            background: white;
+            border-radius: var(--border-radius);
+            box-shadow: var(--shadow-light);
+            margin: 2rem 0;
+        }
+
+        .auth-required h2 {
+            margin-bottom: 1rem;
+            color: var(--text-color);
+        }
+
+        .auth-required p {
+            color: #666;
+            margin-bottom: 2rem;
         }
 
         /* Search and Filter Styles */
@@ -287,9 +1445,14 @@
             color: #f57c00;
         }
 
-        .meta-premium {
-            background: linear-gradient(45deg, #ffd700, #ffed4e);
-            color: #b8860b;
+        .meta-synced {
+            background: #e8f5e8;
+            color: #4caf50;
+        }
+
+        .meta-local {
+            background: #f3e5f5;
+            color: #9c27b0;
         }
 
         .card-author {
@@ -298,6 +1461,7 @@
             gap: 0.5rem;
             font-size: 0.8rem;
             color: #666;
+            margin-bottom: 0.5rem;
         }
 
         .author-avatar {
@@ -371,22 +1535,6 @@
             cursor: pointer;
         }
 
-        .card-stats {
-            display: flex;
-            gap: 1rem;
-            margin: 1rem 0;
-            padding: 0.5rem 0;
-            border-top: 1px solid var(--border-color);
-            font-size: 0.8rem;
-            color: #666;
-        }
-
-        .stat-item {
-            display: flex;
-            align-items: center;
-            gap: 0.3rem;
-        }
-
         .card-actions {
             display: flex;
             justify-content: space-between;
@@ -396,12 +1544,7 @@
             border-top: 1px solid var(--border-color);
         }
 
-        .action-left {
-            display: flex;
-            gap: 0.5rem;
-        }
-
-        .action-right {
+        .action-left, .action-right {
             display: flex;
             gap: 0.5rem;
         }
@@ -455,21 +1598,21 @@
             justify-content: center;
         }
 
-        @keyframes fadeIn {
-            from { opacity: 0; }
-            to { opacity: 1; }
-        }
-
         .modal-content {
             background: white;
             border-radius: var(--border-radius);
             padding: 2rem;
             width: 90%;
-            max-width: 600px;
+            max-width: 500px;
             max-height: 90vh;
             overflow-y: auto;
             animation: slideUp 0.3s ease;
             box-shadow: 0 20px 40px rgba(0,0,0,0.2);
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
         }
 
         @keyframes slideUp {
@@ -538,7 +1681,7 @@
         }
 
         .form-textarea {
-            min-height: 200px;
+            min-height: 120px;
             resize: vertical;
             font-family: 'Monaco', 'Menlo', monospace;
             line-height: 1.5;
@@ -570,7 +1713,40 @@
             border-top: 2px solid var(--border-color);
         }
 
-        /* Floating Action Button */
+        /* Auth Forms */
+        .auth-tabs {
+            display: flex;
+            gap: 1rem;
+            margin-bottom: 2rem;
+            border-bottom: 2px solid var(--border-color);
+        }
+
+        .auth-tab {
+            padding: 0.75rem 1rem;
+            background: none;
+            border: none;
+            cursor: pointer;
+            font-size: 1rem;
+            font-weight: 500;
+            color: #666;
+            border-bottom: 2px solid transparent;
+            transition: var(--transition);
+        }
+
+        .auth-tab.active {
+            color: var(--primary-color);
+            border-bottom-color: var(--primary-color);
+        }
+
+        .auth-form {
+            display: none;
+        }
+
+        .auth-form.active {
+            display: block;
+        }
+
+        /* FAB */
         .fab {
             position: fixed;
             bottom: 2rem;
@@ -630,28 +1806,12 @@
             background: rgba(102, 126, 234, 0.1);
         }
 
-        .nav-item::before {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: 50%;
-            transform: translateX(-50%);
-            width: 0;
-            height: 2px;
-            background: var(--primary-color);
-            transition: width 0.3s ease;
-        }
-
-        .nav-item.active::before {
-            width: 24px;
-        }
-
         .nav-icon {
             font-size: 1.2rem;
             margin-bottom: 0.2rem;
         }
 
-        /* Notification Styles */
+        /* Notification */
         .notification {
             position: fixed;
             top: 2rem;
@@ -683,32 +1843,6 @@
             background: linear-gradient(135deg, #ff9800, #f57c00);
         }
 
-        /* Loading States */
-        .loading {
-            display: inline-block;
-            width: 20px;
-            height: 20px;
-            border: 3px solid rgba(255,255,255,0.3);
-            border-radius: 50%;
-            border-top-color: white;
-            animation: spin 1s ease-in-out infinite;
-        }
-
-        @keyframes spin {
-            to { transform: rotate(360deg); }
-        }
-
-        .skeleton {
-            background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
-            background-size: 200% 100%;
-            animation: loading 1.5s infinite;
-        }
-
-        @keyframes loading {
-            0% { background-position: 200% 0; }
-            100% { background-position: -200% 0; }
-        }
-
         /* Empty States */
         .empty-state {
             grid-column: 1 / -1;
@@ -726,54 +1860,6 @@
         .empty-state h3 {
             margin-bottom: 0.5rem;
             color: var(--text-color);
-        }
-
-        /* Advanced Features */
-        .rating-stars {
-            display: flex;
-            gap: 2px;
-        }
-
-        .star {
-            color: #ddd;
-            cursor: pointer;
-            transition: color 0.2s ease;
-        }
-
-        .star.filled {
-            color: #ffd700;
-        }
-
-        .star:hover {
-            color: #ffd700;
-        }
-
-        .version-badge {
-            background: #e3f2fd;
-            color: #1976d2;
-            padding: 0.2rem 0.4rem;
-            border-radius: 4px;
-            font-size: 0.6rem;
-            font-weight: 600;
-        }
-
-        .ai-suggestion {
-            background: linear-gradient(135deg, #667eea20, #764ba220);
-            border: 1px solid var(--primary-color);
-            border-radius: 8px;
-            padding: 1rem;
-            margin: 1rem 0;
-            position: relative;
-        }
-
-        .ai-suggestion::before {
-            content: '🤖';
-            position: absolute;
-            top: -8px;
-            left: 8px;
-            background: white;
-            padding: 0 0.5rem;
-            font-size: 0.8rem;
         }
 
         /* Responsive Design */
@@ -816,8 +1902,8 @@
                 font-size: 1.3rem;
             }
 
-            .btn {
-                padding: 0.4rem 0.8rem;
+            .user-info {
+                gap: 0.5rem;
                 font-size: 0.8rem;
             }
 
@@ -854,40 +1940,6 @@
                 font-size: 0.7rem;
             }
         }
-
-        /* Dark mode support */
-        @media (prefers-color-scheme: dark) {
-            :root {
-                --secondary-color: #1a1a1a;
-                --text-color: #e0e0e0;
-                --border-color: #333;
-            }
-
-            body {
-                background-color: #1a1a1a;
-                color: #e0e0e0;
-            }
-
-            .prompt-card, .search-section, .modal-content {
-                background: #2d2d2d;
-                border-color: #444;
-            }
-
-            .prompt-preview {
-                background: #222;
-                color: #e0e0e0;
-            }
-
-            .form-input, .form-textarea, .form-select {
-                background: #333;
-                border-color: #555;
-                color: #e0e0e0;
-            }
-
-            .bottom-nav {
-                background: rgba(45,45,45,0.95);
-            }
-        }
     </style>
 </head>
 <body>
@@ -897,9 +1949,15 @@
             <div class="logo">
                 🚀 PromptHub
             </div>
-            <div class="user-status" id="userStatus">
-                <div class="sync-indicator" id="syncIndicator" title="同步狀態"></div>
-                <span id="userInfo">訪客模式</span>
+            <div class="user-info" id="userInfo">
+                <div class="sync-status">
+                    <div class="sync-indicator" id="syncIndicator" title="同步狀態"></div>
+                    <span id="syncStatus">連接中...</span>
+                </div>
+                <div class="user-avatar" id="userAvatar" style="display: none;">
+                    <span id="userInitial"></span>
+                </div>
+                <span id="userDisplayName">訪客模式</span>
                 <button class="btn btn-primary" onclick="toggleAuth()" id="authBtn">
                     👤 登入
                 </button>
@@ -910,8 +1968,18 @@
     <!-- Main Content -->
     <div class="container">
         <main class="main-content">
+            <!-- Auth Required State -->
+            <div class="auth-required" id="authRequired" style="display: none;">
+                <div class="empty-state-icon">🔐</div>
+                <h2>歡迎使用 PromptHub</h2>
+                <p>登入後即可享受雲端同步、多裝置存取等完整功能</p>
+                <button class="btn btn-primary" onclick="showAuthModal()" style="background: var(--primary-gradient); padding: 1rem 2rem;">
+                    立即登入/註冊
+                </button>
+            </div>
+
             <!-- Search Section -->
-            <section class="search-section">
+            <section class="search-section" id="searchSection">
                 <div style="position: relative;">
                     <input type="text" class="search-input" placeholder="🔍 搜尋你的 AI Prompts..." id="searchInput">
                     <div style="position: absolute; right: 10px; top: 50%; transform: translateY(-50%); color: #999; font-size: 0.8rem;" id="searchHint">
@@ -925,7 +1993,7 @@
                     <button class="filter-tag" data-filter="work">💼 工作</button>
                     <button class="filter-tag" data-filter="creative">🎨 創作</button>
                     <button class="filter-tag" data-filter="learning">📚 學習</button>
-                    <button class="filter-tag" data-filter="premium">⭐ 精選</button>
+                    <button class="filter-tag" data-filter="other">📂 其他</button>
                 </div>
             </section>
 
@@ -936,91 +2004,21 @@
         </main>
     </div>
 
-    <!-- Add/Edit Modal -->
-    <div class="modal" id="addModal">
+    <!-- Auth Modal -->
+    <div class="modal" id="authModal">
         <div class="modal-content">
             <div class="modal-header">
-                <h2 class="modal-title" id="modalTitle">新增 Prompt</h2>
-                <button class="close-btn" onclick="closeModal()">&times;</button>
+                <h2 class="modal-title">加入 PromptHub</h2>
+                <button class="close-btn" onclick="closeAuthModal()">&times;</button>
             </div>
             
-            <form id="promptForm">
-                <div class="form-group">
-                    <label class="form-label">標題 *</label>
-                    <input type="text" class="form-input" id="promptTitle" required placeholder="為你的 Prompt 取個好名字">
-                </div>
-                
-                <div class="form-group">
-                    <label class="form-label">Prompt 內容 *</label>
-                    <textarea class="form-textarea" id="promptContent" required placeholder="請輸入你的 prompt 內容...
-
-範例：
-你是一個專業的{角色}。請根據以下資訊：
-
-輸入：{輸入內容}
-目標：{預期目標}
-
-要求：
-- 要求1
-- 要求2
-- 要求3
-
-請提供詳細且實用的回答。"></textarea>
-                    <div style="font-size: 0.8rem; color: #666; margin-top: 0.5rem;">
-                        💡 使用 {變數名稱} 來標記可替換的部分
-                    </div>
-                </div>
-                
-                <div class="form-group">
-                    <label class="form-label">描述</label>
-                    <textarea class="form-input" id="promptDescription" placeholder="簡短描述這個 prompt 的用途、適用場景..." rows="3"></textarea>
-                </div>
-                
-                <div class="form-group">
-                    <label class="form-label">標籤（用逗號或空格分隔）</label>
-                    <input type="text" class="form-input" id="promptTags" placeholder="例如：工作 創作 寫作 行銷">
-                </div>
-                
-                <div class="form-group">
-                    <label class="form-label">分類</label>
-                    <select class="form-select" id="promptCategory">
-                        <option value="work">💼 工作</option>
-                        <option value="creative">🎨 創作</option>
-                        <option value="learning">📚 學習</option>
-                        <option value="coding">💻 程式開發</option>
-                        <option value="business">🏢 商業</option>
-                        <option value="other">📂 其他</option>
-                    </select>
-                </div>
-                
-                <div class="form-group">
-                    <div class="form-checkbox-group">
-                        <input type="checkbox" class="form-checkbox" id="promptPublic">
-                        <label for="promptPublic">🌐 設為公開（其他使用者可以看到和使用）</label>
-                    </div>
-                </div>
-                
-                <div class="form-actions">
-                    <button type="button" class="btn btn-secondary" onclick="closeModal()">取消</button>
-                    <button type="button" class="btn" onclick="saveDraft()" id="draftBtn">💾 儲存草稿</button>
-                    <button type="submit" class="btn btn-success" id="submitBtn">
-                        <span class="loading" style="display: none;"></span>
-                        儲存
-                    </button>
-                </div>
-            </form>
-        </div>
-    </div>
-
-    <!-- Login Modal -->
-    <div class="modal" id="loginModal">
-        <div class="modal-content" style="max-width: 400px;">
-            <div class="modal-header">
-                <h2 class="modal-title">登入 PromptHub</h2>
-                <button class="close-btn" onclick="closeLoginModal()">&times;</button>
+            <div class="auth-tabs">
+                <button class="auth-tab active" onclick="switchAuthTab('login')">登入</button>
+                <button class="auth-tab" onclick="switchAuthTab('register')">註冊</button>
             </div>
-            
-            <form id="loginForm">
+
+            <!-- Login Form -->
+            <form class="auth-form active" id="loginForm">
                 <div class="form-group">
                     <label class="form-label">電子郵件</label>
                     <input type="email" class="form-input" id="loginEmail" required placeholder="your@email.com">
@@ -1032,1198 +2030,50 @@
                 </div>
                 
                 <div class="form-actions">
-                    <button type="button" class="btn btn-secondary" onclick="showRegister()">註冊帳號</button>
-                    <button type="submit" class="btn btn-success">
+                    <button type="button" class="btn btn-secondary" onclick="showForgotPassword()">忘記密碼？</button>
+                    <button type="submit" class="btn btn-success" id="loginSubmitBtn">
                         <span class="loading" style="display: none;"></span>
                         登入
                     </button>
                 </div>
             </form>
-            
-            <div style="text-align: center; margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--border-color); color: #666; font-size: 0.9rem;">
-                🔒 你的資料將安全地同步到雲端
-            </div>
-        </div>
-    </div>
 
-    <!-- Export/Import Modal -->
-    <div class="modal" id="dataModal">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h2 class="modal-title">資料管理</h2>
-                <button class="close-btn" onclick="closeDataModal()">&times;</button>
-            </div>
-            
-            <div style="display: grid; gap: 1rem;">
-                <div style="text-align: center; padding: 1rem; background: #f8f9fa; border-radius: 8px;">
-                    <h3>匯出資料</h3>
-                    <p style="color: #666; margin: 0.5rem 0;">將你的所有 Prompts 下載為備份檔案</p>
-                    <button class="btn btn-primary" onclick="exportData()">
-                        📥 匯出 JSON 檔案
-                    </button>
+            <!-- Register Form -->
+            <form class="auth-form" id="registerForm">
+                <div class="form-group">
+                    <label class="form-label">電子郵件</label>
+                    <input type="email" class="form-input" id="registerEmail" required placeholder="your@email.com">
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">用戶名稱</label>
+                    <input type="text" class="form-input" id="registerUsername" required placeholder="選擇一個用戶名稱">
                 </div>
                 
-                <div style="text-align: center; padding: 1rem; background: #f8f9fa; border-radius: 8px;">
-                    <h3>匯入資料</h3>
-                    <p style="color: #666; margin: 0.5rem 0;">從備份檔案中恢復你的 Prompts</p>
-                    <input type="file" id="importFile" accept=".json" style="display: none;" onchange="importData(this.files[0])">
-                    <button class="btn btn-primary" onclick="document.getElementById('importFile').click()">
-                        📤 選擇檔案匯入
-                    </button>
+                <div class="form-group">
+                    <label class="form-label">密碼</label>
+                    <input type="password" class="form-input" id="registerPassword" required placeholder="至少 8 個字符">
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">確認密碼</label>
+                    <input type="password" class="form-input" id="registerPasswordConfirm" required placeholder="再次輸入密碼">
                 </div>
                 
-                <div style="text-align: center; padding: 1rem; background: #fff3cd; border-radius: 8px; border: 1px solid #ffeaa7;">
-                    <h3>⚠️ 清除所有資料</h3>
-                    <p style="color: #856404; margin: 0.5rem 0;">這將刪除所有本地資料，無法復原</p>
-                    <button class="btn btn-danger" onclick="clearAllData()">
-                        🗑️ 清除資料
+                <div class="form-group">
+                    <div class="form-checkbox-group">
+                        <input type="checkbox" class="form-checkbox" id="agreeTerms" required>
+                        <label for="agreeTerms">我同意服務條款和隱私政策</label>
+                    </div>
+                </div>
+                
+                <div class="form-actions">
+                    <button type="button" class="btn btn-secondary" onclick="closeAuthModal()">取消</button>
+                    <button type="submit" class="btn btn-success" id="registerSubmitBtn">
+                        <span class="loading" style="display: none;"></span>
+                        註冊
                     </button>
                 </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Floating Action Button -->
-    <button class="fab" onclick="showAddModal()" title="快速新增 Prompt (Ctrl+N)">
-        ➕
-    </button>
-
-    <!-- Bottom Navigation -->
-    <nav class="bottom-nav">
-        <a href="#" class="nav-item active" data-page="home">
-            <div class="nav-icon">🏠</div>
-            <div>首頁</div>
-        </a>
-        <a href="#" class="nav-item" data-page="explore">
-            <div class="nav-icon">🔍</div>
-            <div>探索</div>
-        </a>
-        <a href="#" class="nav-item" data-page="favorites">
-            <div class="nav-icon">❤️</div>
-            <div>收藏</div>
-        </a>
-        <a href="#" class="nav-item" data-page="profile">
-            <div class="nav-icon">👤</div>
-            <div>我的</div>
-        </a>
-    </nav>
-
-    <!-- Notification -->
-    <div class="notification" id="notification"></div>
-
-    <script>
-        // Application State
-        let currentUser = null;
-        let currentEditId = null;
-        let isOnline = navigator.onLine;
-        let syncQueue = [];
-        
-        // Sample Data with enhanced features
-        let prompts = [
-            {
-                id: 1,
-                title: "智能文案產生器",
-                content: `你是一個頂尖的文案創作專家。請根據以下資訊創作一個引人注目的行銷文案：
-
-產品/服務：{product_name}
-核心特色：{key_features}
-目標受眾：{target_audience}
-品牌調性：{brand_tone}
-
-創作要求：
-- 文案長度：{word_count} 字以內
-- 突出核心價值主張
-- 運用情感化語言
-- 包含明確的行動呼籲 (CTA)
-- 符合品牌調性和目標受眾
-
-請提供 3 個不同風格的文案版本供選擇。`,
-                description: "專業級文案創作工具，支援多種品牌調性和目標受眾，適用於廣告、社群媒體、電商等場景",
-                tags: ["行銷", "文案", "創作", "商業", "廣告", "社群"],
-                category: "business",
-                isPublic: true,
-                author: "MarketingPro",
-                authorAvatar: "M",
-                likes: 342,
-                comments: 28,
-                views: 1567,
-                bookmarks: 89,
-                rating: 4.8,
-                version: "2.1",
-                createdAt: "2025-08-20T10:30:00Z",
-                updatedAt: "2025-08-22T15:45:00Z",
-                liked: false,
-                bookmarked: false,
-                premium: false,
-                verified: true
-            },
-            {
-                id: 2,
-                title: "代碼審查助手 Pro",
-                content: `作為一位資深軟體工程師和代碼審查專家，請深入分析以下程式碼：
-
-程式語言：{language}
-代碼內容：
-\`\`\`{language}
-{code_content}
-\`\`\`
-
-請從以下角度進行全面審查：
-
-🔍 **代碼品質分析**
-- 可讀性和維護性
-- 命名規範和註解品質
-- 代碼結構和組織
-
-⚡ **效能優化建議**
-- 時間複雜度和空間複雜度
-- 潛在的效能瓶頸
-- 優化建議和替代方案
-
-🔒 **安全性檢查**
-- 常見安全漏洞
-- 輸入驗證和錯誤處理
-- 最佳安全實踐
-
-📋 **最佳實踐建議**
-- 行業標準和慣例
-- 設計模式應用
-- 測試覆蓋建議
-
-請提供具體、可行的改善建議和修改後的代碼範例。`,
-                description: "全方位程式碼審查工具，涵蓋品質、效能、安全性和最佳實踐，支援多種程式語言",
-                tags: ["程式", "審查", "開發", "品質", "安全", "優化"],
-                category: "coding",
-                isPublic: false,
-                author: "我",
-                authorAvatar: "我",
-                likes: 0,
-                comments: 0,
-                views: 23,
-                bookmarks: 1,
-                rating: 5.0,
-                version: "1.0",
-                createdAt: "2025-08-22T09:15:00Z",
-                updatedAt: "2025-08-22T09:15:00Z",
-                liked: false,
-                bookmarked: true,
-                premium: false,
-                verified: false
-            },
-            {
-                id: 3,
-                title: "AI 學習筆記整理器",
-                content: `請將以下學習內容整理成結構化、易於理解和記憶的筆記：
-
-📚 **學習主題**：{topic}
-📖 **學習材料**：{source_materials}
-🎯 **學習目標**：{learning_goals}
-⏱️ **預計學習時間**：{time_limit}
-
-請按照以下格式進行整理：
-
-## 📝 核心概念
-- 關鍵定義和術語
-- 基本原理和框架
-
-## 🔍 重點摘要  
-- 主要知識點
-- 重要公式或規則
-- 關鍵案例和範例
-
-## 💡 實際應用
-- 應用場景和案例
-- 實作步驟和方法
-
-## 🧠 記憶技巧
-- 助記口訣或方法
-- 視覺化圖表建議
-
-## ❓ 延伸思考
-- 討論問題
-- 進階學習方向
-
-## 📚 推薦資源
-- 相關書籍文章
-- 線上課程或工具
-
-## ✅ 自我檢測
-- 複習問題清單
-- 實踐練習建議
-
-請確保內容簡潔明瞭，便於快速複習和長期記憶。`,
-                description: "智能學習助手，將複雜知識轉化為結構化筆記，提升學習效率和記憶效果",
-                tags: ["學習", "筆記", "整理", "教育", "記憶", "複習"],
-                category: "learning",
-                isPublic: true,
-                author: "EduMaster",
-                authorAvatar: "E",
-                likes: 198,
-                comments: 45,
-                views: 892,
-                bookmarks: 156,
-                rating: 4.6,
-                version: "1.5",
-                createdAt: "2025-08-21T14:20:00Z",
-                updatedAt: "2025-08-21T16:30:00Z",
-                liked: false,
-                bookmarked: false,
-                premium: true,
-                verified: true
-            },
-            {
-                id: 4,
-                title: "創意故事生成器",
-                content: `你是一位富有想像力的故事創作大師。請根據以下元素創作一個引人入勝的故事：
-
-🎭 **故事類型**：{genre}
-👥 **主要角色**：{main_characters}  
-🌍 **故事背景**：{setting}
-🎯 **核心衝突**：{main_conflict}
-💎 **關鍵元素**：{key_elements}
-📏 **故事長度**：{story_length}
-
-創作要求：
-✨ 開頭要吸引讀者注意
-🎢 情節發展要有起伏轉折  
-💫 角色要有鮮明個性和成長
-🔚 結尾要令人滿足且意猶未盡
-🎨 文筆要生動有趣，富有畫面感
-
-請先提供故事大綱，然後創作完整故事。`,
-                description: "專業創意寫作工具，支援多種文體和風格，激發無限創作靈感",
-                tags: ["創作", "故事", "寫作", "創意", "小說", "劇本"],
-                category: "creative",
-                isPublic: true,
-                author: "StoryTeller",
-                authorAvatar: "S",
-                likes: 276,
-                comments: 67,
-                views: 1234,
-                bookmarks: 203,
-                rating: 4.9,
-                version: "2.0",
-                createdAt: "2025-08-19T16:45:00Z",
-                updatedAt: "2025-08-20T10:12:00Z",
-                liked: true,
-                bookmarked: true,
-                premium: true,
-                verified: true
-            }
-        ];
-
-        // Application Controller
-        class PromptHubApp {
-            constructor() {
-                this.init();
-            }
-
-            init() {
-                this.loadFromStorage();
-                this.setupEventListeners();
-                this.setupServiceWorker();
-                this.renderPrompts();
-                this.updateSyncStatus();
-                this.showWelcomeMessage();
-            }
-
-            loadFromStorage() {
-                try {
-                    const savedPrompts = localStorage.getItem('prompthub_prompts');
-                    const savedUser = localStorage.getItem('prompthub_user');
-                    
-                    if (savedPrompts) {
-                        prompts = JSON.parse(savedPrompts);
-                    }
-                    
-                    if (savedUser) {
-                        currentUser = JSON.parse(savedUser);
-                        this.updateUserUI();
-                    }
-                    
-                    console.log(`✅ 載入了 ${prompts.length} 個 Prompts`);
-                } catch (error) {
-                    console.error('載入資料失敗:', error);
-                    this.showNotification('載入資料失敗', 'error');
-                }
-            }
-
-            saveToStorage() {
-                try {
-                    localStorage.setItem('prompthub_prompts', JSON.stringify(prompts));
-                    if (currentUser) {
-                        localStorage.setItem('prompthub_user', JSON.stringify(currentUser));
-                    }
-                    localStorage.setItem('prompthub_last_sync', Date.now().toString());
-                    
-                    // 模擬雲端同步
-                    this.simulateCloudSync();
-                } catch (error) {
-                    console.error('儲存資料失敗:', error);
-                    this.showNotification('儲存失敗', 'error');
-                }
-            }
-
-            simulateCloudSync() {
-                const indicator = document.getElementById('syncIndicator');
-                indicator.className = 'sync-indicator syncing';
-                
-                // 模擬網路延遲
-                setTimeout(() => {
-                    if (isOnline) {
-                        indicator.className = 'sync-indicator';
-                        console.log('☁️ 已同步到雲端');
-                    } else {
-                        indicator.className = 'sync-indicator offline';
-                        console.log('📴 離線模式 - 將在連網後同步');
-                    }
-                }, 1000 + Math.random() * 2000);
-            }
-
-            setupEventListeners() {
-                // 搜尋功能
-                const searchInput = document.getElementById('searchInput');
-                let searchTimeout;
-                searchInput.addEventListener('input', (e) => {
-                    clearTimeout(searchTimeout);
-                    searchTimeout = setTimeout(() => {
-                        this.handleSearch(e.target.value);
-                    }, 300);
-                });
-
-                // 篩選功能
-                document.querySelectorAll('.filter-tag').forEach(tag => {
-                    tag.addEventListener('click', (e) => this.handleFilter(e));
-                });
-
-                // 表單提交
-                document.getElementById('promptForm').addEventListener('submit', (e) => {
-                    this.handleFormSubmit(e);
-                });
-
-                document.getElementById('loginForm').addEventListener('submit', (e) => {
-                    this.handleLogin(e);
-                });
-
-                // 鍵盤快捷鍵
-                document.addEventListener('keydown', (e) => this.handleKeyboard(e));
-
-                // 底部導航
-                document.querySelectorAll('.nav-item').forEach(item => {
-                    item.addEventListener('click', (e) => this.handleNavigation(e));
-                });
-
-                // 網路狀態監控
-                window.addEventListener('online', () => this.handleOnlineStatus(true));
-                window.addEventListener('offline', () => this.handleOnlineStatus(false));
-
-                // 模態框外部點擊關閉
-                document.querySelectorAll('.modal').forEach(modal => {
-                    modal.addEventListener('click', (e) => {
-                        if (e.target === modal) {
-                            this.closeModal(modal.id);
-                        }
-                    });
-                });
-            }
-
-            setupServiceWorker() {
-                if ('serviceWorker' in navigator) {
-                    // 在真實應用中，這裡會註冊 Service Worker
-                    console.log('📱 PWA 功能準備就緒');
-                    
-                    // 模擬 PWA 安裝提示
-                    setTimeout(() => {
-                        if (!localStorage.getItem('pwa_install_prompted')) {
-                            this.showInstallPrompt();
-                        }
-                    }, 5000);
-                }
-            }
-
-            showInstallPrompt() {
-                if (confirm('🚀 要將 PromptHub 安裝到你的裝置嗎？這樣可以更快速地存取，還支援離線使用！')) {
-                    localStorage.setItem('pwa_install_prompted', 'true');
-                    this.showNotification('PWA 安裝功能開發中...', 'warning');
-                }
-            }
-
-            renderPrompts(filteredPrompts = prompts) {
-                const grid = document.getElementById('promptGrid');
-                grid.innerHTML = '';
-
-                if (filteredPrompts.length === 0) {
-                    grid.innerHTML = this.createEmptyState();
-                    return;
-                }
-
-                filteredPrompts
-                    .sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt))
-                    .forEach(prompt => {
-                        const card = this.createPromptCard(prompt);
-                        grid.appendChild(card);
-                    });
-            }
-
-            createEmptyState() {
-                return `
-                    <div class="empty-state">
-                        <div class="empty-state-icon">🔍</div>
-                        <h3>沒有找到符合的 Prompts</h3>
-                        <p>試試調整搜尋關鍵字或篩選條件，或者創建一個新的 Prompt！</p>
-                        <button class="btn btn-primary" onclick="app.showAddModal()" style="margin-top: 1rem;">
-                            ➕ 創建第一個 Prompt
-                        </button>
-                    </div>
-                `;
-            }
-
-            createPromptCard(prompt) {
-                const card = document.createElement('div');
-                card.className = 'prompt-card';
-                card.innerHTML = `
-                    ${prompt.premium ? '<div class="meta-tag meta-premium" style="position: absolute; top: 1rem; right: 1rem;">⭐ 精選</div>' : ''}
-                    
-                    <div class="card-header">
-                        <div style="flex: 1;">
-                            <div class="card-title">${prompt.title}</div>
-                            <div class="card-meta">
-                                <span class="meta-tag ${prompt.isPublic ? 'meta-public' : 'meta-private'}">
-                                    ${prompt.isPublic ? '🌐 公開' : '🔒 私人'}
-                                </span>
-                                <span class="meta-tag" style="background: #f0f0f0; color: #666;">
-                                    ${this.getCategoryName(prompt.category)}
-                                </span>
-                                ${prompt.verified ? '<span class="meta-tag" style="background: #4caf50; color: white;">✓ 驗證</span>' : ''}
-                            </div>
-                            <div class="card-author">
-                                <div class="author-avatar">${prompt.authorAvatar}</div>
-                                <span>${prompt.author}</span>
-                                <span>•</span>
-                                <span>${this.formatDate(prompt.updatedAt)}</span>
-                                ${prompt.version ? `<span class="version-badge">v${prompt.version}</span>` : ''}
-                            </div>
-                        </div>
-                        <div>
-                            ${prompt.author === '我' || (currentUser && prompt.author === currentUser.name) ? `
-                                <button class="action-btn" onclick="app.editPrompt(${prompt.id})" title="編輯">
-                                    ✏️
-                                </button>
-                            ` : ''}
-                        </div>
-                    </div>
-                    
-                    <div class="card-content">
-                        <div class="prompt-preview" onclick="app.expandPrompt(${prompt.id})">${this.truncateText(prompt.content, 200)}</div>
-                        <p class="card-description">${prompt.description}</p>
-                        <div class="card-tags">
-                            ${prompt.tags.map(tag => `<span class="tag" onclick="app.searchByTag('${tag}')">#${tag}</span>`).join('')}
-                        </div>
-                    </div>
-
-                    <div class="card-stats">
-                        <div class="stat-item">
-                            <div class="rating-stars">
-                                ${this.createStars(prompt.rating)}
-                            </div>
-                            <span>${prompt.rating}</span>
-                        </div>
-                        <div class="stat-item">
-                            👁️ ${this.formatNumber(prompt.views)}
-                        </div>
-                        <div class="stat-item">
-                            💬 ${prompt.comments}
-                        </div>
-                    </div>
-                    
-                    <div class="card-actions">
-                        <div class="action-left">
-                            <button class="action-btn ${prompt.liked ? 'liked' : ''}" onclick="app.toggleLike(${prompt.id})">
-                                ${prompt.liked ? '❤️' : '🤍'} ${this.formatNumber(prompt.likes)}
-                            </button>
-                            <button class="action-btn ${prompt.bookmarked ? 'bookmarked' : ''}" onclick="app.toggleBookmark(${prompt.id})">
-                                ${prompt.bookmarked ? '⭐' : '☆'} 
-                            </button>
-                            <button class="action-btn" onclick="app.showComments(${prompt.id})">
-                                💬 回覆
-                            </button>
-                        </div>
-                        <div class="action-right">
-                            <button class="action-btn" onclick="app.copyPrompt(${prompt.id})" title="複製內容">
-                                📋
-                            </button>
-                            <button class="action-btn" onclick="app.sharePrompt(${prompt.id})" title="分享">
-                                📤
-                            </button>
-                        </div>
-                    </div>
-                `;
-                return card;
-            }
-
-            getCategoryName(category) {
-                const categories = {
-                    work: '💼 工作',
-                    creative: '🎨 創作',
-                    learning: '📚 學習',
-                    coding: '💻 程式',
-                    business: '🏢 商業',
-                    other: '📂 其他'
-                };
-                return categories[category] || '📂 其他';
-            }
-
-            formatDate(dateString) {
-                const date = new Date(dateString);
-                const now = new Date();
-                const diff = now - date;
-                const days = Math.floor(diff / (1000 * 60 * 60 * 24));
-                
-                if (days === 0) return '今天';
-                if (days === 1) return '昨天';
-                if (days < 7) return `${days} 天前`;
-                if (days < 30) return `${Math.floor(days / 7)} 週前`;
-                return date.toLocaleDateString('zh-TW');
-            }
-
-            formatNumber(num) {
-                if (num >= 1000) {
-                    return (num / 1000).toFixed(1) + 'K';
-                }
-                return num.toString();
-            }
-
-            createStars(rating) {
-                const fullStars = Math.floor(rating);
-                const hasHalfStar = rating % 1 !== 0;
-                let stars = '';
-                
-                for (let i = 0; i < 5; i++) {
-                    if (i < fullStars) {
-                        stars += '<span class="star filled">⭐</span>';
-                    } else if (i === fullStars && hasHalfStar) {
-                        stars += '<span class="star filled">⭐</span>';
-                    } else {
-                        stars += '<span class="star">⭐</span>';
-                    }
-                }
-                return stars;
-            }
-
-            truncateText(text, maxLength) {
-                if (text.length <= maxLength) return text;
-                return text.substring(0, maxLength) + '...';
-            }
-
-            // Event Handlers
-            handleSearch(query) {
-                if (!query.trim()) {
-                    this.renderPrompts();
-                    return;
-                }
-
-                const filtered = prompts.filter(prompt => 
-                    prompt.title.toLowerCase().includes(query.toLowerCase()) ||
-                    prompt.content.toLowerCase().includes(query.toLowerCase()) ||
-                    prompt.description.toLowerCase().includes(query.toLowerCase()) ||
-                    prompt.tags.some(tag => tag.toLowerCase().includes(query.toLowerCase())) ||
-                    prompt.author.toLowerCase().includes(query.toLowerCase())
-                );
-                
-                this.renderPrompts(filtered);
-                console.log(`🔍 搜尋 "${query}" 找到 ${filtered.length} 個結果`);
-            }
-
-            handleFilter(e) {
-                document.querySelectorAll('.filter-tag').forEach(tag => tag.classList.remove('active'));
-                e.target.classList.add('active');
-                
-                const filter = e.target.dataset.filter;
-                let filtered = prompts;
-                
-                switch (filter) {
-                    case 'all':
-                        filtered = prompts;
-                        break;
-                    case 'public':
-                        filtered = prompts.filter(p => p.isPublic);
-                        break;
-                    case 'private':
-                        filtered = prompts.filter(p => !p.isPublic);
-                        break;
-                    case 'premium':
-                        filtered = prompts.filter(p => p.premium);
-                        break;
-                    default:
-                        filtered = prompts.filter(p => p.category === filter);
-                }
-                
-                this.renderPrompts(filtered);
-                console.log(`📂 篩選 "${filter}" 顯示 ${filtered.length} 個 Prompts`);
-            }
-
-            handleFormSubmit(e) {
-                e.preventDefault();
-                
-                const submitBtn = document.getElementById('submitBtn');
-                const loading = submitBtn.querySelector('.loading');
-                
-                // 顯示載入狀態
-                submitBtn.disabled = true;
-                loading.style.display = 'inline-block';
-                
-                const formData = {
-                    title: document.getElementById('promptTitle').value,
-                    content: document.getElementById('promptContent').value,
-                    description: document.getElementById('promptDescription').value,
-                    tags: document.getElementById('promptTags').value
-                        .split(/[,\s]+/)
-                        .map(tag => tag.trim())
-                        .filter(tag => tag),
-                    category: document.getElementById('promptCategory').value,
-                    isPublic: document.getElementById('promptPublic').checked
-                };
-
-                // 模擬網路延遲
-                setTimeout(() => {
-                    try {
-                        if (currentEditId) {
-                            this.updatePrompt(currentEditId, formData);
-                        } else {
-                            this.createPrompt(formData);
-                        }
-                        
-                        this.closeModal('addModal');
-                        this.clearDraft();
-                    } catch (error) {
-                        this.showNotification('儲存失敗，請重試', 'error');
-                    } finally {
-                        submitBtn.disabled = false;
-                        loading.style.display = 'none';
-                    }
-                }, 1000);
-            }
-
-            handleLogin(e) {
-                e.preventDefault();
-                
-                const email = document.getElementById('loginEmail').value;
-                const password = document.getElementById('loginPassword').value;
-                const submitBtn = e.target.querySelector('button[type="submit"]');
-                const loading = submitBtn.querySelector('.loading');
-                
-                submitBtn.disabled = true;
-                loading.style.display = 'inline-block';
-                
-                // 模擬登入過程
-                setTimeout(() => {
-                    // 簡單的模擬驗證
-                    if (email && password) {
-                        currentUser = {
-                            id: Date.now(),
-                            name: email.split('@')[0],
-                            email: email,
-                            avatar: email[0].toUpperCase(),
-                            joinDate: new Date().toISOString(),
-                            premium: Math.random() > 0.5 // 隨機分配會員等級
-                        };
-                        
-                        this.updateUserUI();
-                        this.saveToStorage();
-                        this.closeModal('loginModal');
-                        this.showNotification(`歡迎回來，${currentUser.name}！`, 'success');
-                    } else {
-                        this.showNotification('登入失敗，請檢查帳號密碼', 'error');
-                    }
-                    
-                    submitBtn.disabled = false;
-                    loading.style.display = 'none';
-                }, 1500);
-            }
-
-            handleKeyboard(e) {
-                // Ctrl/Cmd + K: 快速搜尋
-                if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
-                    e.preventDefault();
-                    document.getElementById('searchInput').focus();
-                    this.showNotification('快速搜尋已啟動 🔍');
-                }
-                
-                // Ctrl/Cmd + N: 新增 Prompt
-                if ((e.ctrlKey || e.metaKey) && e.key === 'n') {
-                    e.preventDefault();
-                    this.showAddModal();
-                }
-                
-                // Escape: 關閉模態框
-                if (e.key === 'Escape') {
-                    this.closeAllModals();
-                }
-            }
-
-            handleNavigation(e) {
-                e.preventDefault();
-                
-                document.querySelectorAll('.nav-item').forEach(nav => nav.classList.remove('active'));
-                e.currentTarget.classList.add('active');
-                
-                const page = e.currentTarget.dataset.page;
-                
-                switch (page) {
-                    case 'home':
-                        this.renderPrompts();
-                        this.showNotification('首頁 🏠');
-                        break;
-                    case 'explore':
-                        this.renderPrompts(prompts.filter(p => p.isPublic));
-                        this.showNotification('探索公開 Prompts 🔍');
-                        break;
-                    case 'favorites':
-                        this.renderPrompts(prompts.filter(p => p.bookmarked || p.liked));
-                        this.showNotification('我的收藏 ❤️');
-                        break;
-                    case 'profile':
-                        if (currentUser) {
-                            this.renderPrompts(prompts.filter(p => p.author === currentUser.name || p.author === '我'));
-                            this.showNotification('我的 Prompts 👤');
-                        } else {
-                            this.showLoginModal();
-                        }
-                        break;
-                }
-            }
-
-            handleOnlineStatus(online) {
-                isOnline = online;
-                const indicator = document.getElementById('syncIndicator');
-                
-                if (online) {
-                    indicator.className = 'sync-indicator';
-                    this.showNotification('已重新連線，正在同步...', 'success');
-                    this.processSyncQueue();
-                } else {
-                    indicator.className = 'sync-indicator offline';
-                    this.showNotification('目前離線，資料將暫存本地', 'warning');
-                }
-                
-                this.updateSyncStatus();
-            }
-
-            // Core Functions
-            createPrompt(formData) {
-                const newPrompt = {
-                    id: Date.now(),
-                    ...formData,
-                    author: currentUser ? currentUser.name : '我',
-                    authorAvatar: currentUser ? currentUser.avatar : '我',
-                    likes: 0,
-                    comments: 0,
-                    views: 0,
-                    bookmarks: 0,
-                    rating: 5.0,
-                    version: '1.0',
-                    createdAt: new Date().toISOString(),
-                    updatedAt: new Date().toISOString(),
-                    liked: false,
-                    bookmarked: false,
-                    premium: currentUser?.premium || false,
-                    verified: currentUser?.premium || false
-                };
-
-                prompts.unshift(newPrompt);
-                this.saveToStorage();
-                this.renderPrompts();
-                this.showNotification('✨ 新 Prompt 創建成功！', 'success');
-            }
-
-            updatePrompt(id, formData) {
-                const index = prompts.findIndex(p => p.id === id);
-                if (index !== -1) {
-                    const oldVersion = prompts[index].version || '1.0';
-                    const versionParts = oldVersion.split('.').map(Number);
-                    versionParts[1]++;
-                    const newVersion = versionParts.join('.');
-
-                    prompts[index] = { 
-                        ...prompts[index], 
-                        ...formData,
-                        version: newVersion,
-                        updatedAt: new Date().toISOString()
-                    };
-                    
-                    this.saveToStorage();
-                    this.renderPrompts();
-                    this.showNotification('📝 Prompt 更新成功！', 'success');
-                }
-            }
-
-            deletePrompt(id) {
-                if (confirm('確定要刪除這個 Prompt 嗎？此操作無法復原。')) {
-                    const index = prompts.findIndex(p => p.id === id);
-                    if (index !== -1) {
-                        prompts.splice(index, 1);
-                        this.saveToStorage();
-                        this.renderPrompts();
-                        this.showNotification('🗑️ Prompt 已刪除', 'success');
-                    }
-                }
-            }
-
-            // Interactive Functions
-            toggleLike(id) {
-                const prompt = prompts.find(p => p.id === id);
-                if (prompt) {
-                    if (prompt.liked) {
-                        prompt.likes = Math.max(0, prompt.likes - 1);
-                        prompt.liked = false;
-                    } else {
-                        prompt.likes++;
-                        prompt.liked = true;
-                    }
-                    
-                    this.saveToStorage();
-                    this.renderPrompts();
-                    this.showNotification(prompt.liked ? '已按讚 ❤️' : '已取消按讚');
-                }
-            }
-
-            toggleBookmark(id) {
-                const prompt = prompts.find(p => p.id === id);
-                if (prompt) {
-                    prompt.bookmarked = !prompt.bookmarked;
-                    if (prompt.bookmarked) {
-                        prompt.bookmarks++;
-                    } else {
-                        prompt.bookmarks = Math.max(0, prompt.bookmarks - 1);
-                    }
-                    
-                    this.saveToStorage();
-                    this.renderPrompts();
-                    this.showNotification(prompt.bookmarked ? '已收藏 ⭐' : '已取消收藏');
-                }
-            }
-
-            copyPrompt(id) {
-                const prompt = prompts.find(p => p.id === id);
-                if (prompt) {
-                    navigator.clipboard.writeText(prompt.content).then(() => {
-                        // 增加檢視數
-                        prompt.views++;
-                        this.saveToStorage();
-                        this.renderPrompts();
-                        this.showNotification('📋 Prompt 已複製到剪貼板！', 'success');
-                    }).catch(() => {
-                        this.showNotification('複製失敗，請手動選取', 'error');
-                    });
-                }
-            }
-
-            sharePrompt(id) {
-                const prompt = prompts.find(p => p.id === id);
-                if (prompt) {
-                    const shareData = {
-                        title: `PromptHub - ${prompt.title}`,
-                        text: prompt.description,
-                        url: `${window.location.origin}?prompt=${id}`
-                    };
-                    
-                    if (navigator.share) {
-                        navigator.share(shareData);
-                    } else {
-                        // 備用分享方式
-                        const shareText = `${prompt.title}\n\n${prompt.description}\n\n查看完整內容：${shareData.url}`;
-                        navigator.clipboard.writeText(shareText);
-                        this.showNotification('📤 分享連結已複製！', 'success');
-                    }
-                }
-            }
-
-            expandPrompt(id) {
-                const prompt = prompts.find(p => p.id === id);
-                if (prompt) {
-                    // 增加檢視數
-                    prompt.views++;
-                    this.saveToStorage();
-                    
-                    // 顯示完整內容（可以開發獨立的檢視模態框）
-                    this.showNotification('完整檢視功能開發中... 👀');
-                }
-            }
-
-            searchByTag(tag) {
-                document.getElementById('searchInput').value = tag;
-                this.handleSearch(tag);
-            }
-
-            showComments(id) {
-                this.showNotification('留言功能開發中... 💬');
-            }
-
-            // Modal Functions
-            showAddModal() {
-                currentEditId = null;
-                document.getElementById('modalTitle').textContent = '新增 Prompt';
-                document.getElementById('promptForm').reset();
-                this.loadDraft();
-                this.showModal('addModal');
-            }
-
-            editPrompt(id) {
-                const prompt = prompts.find(p => p.id === id);
-                if (!prompt) return;
-
-                currentEditId = id;
-                document.getElementById('modalTitle').textContent = '編輯 Prompt';
-                document.getElementById('promptTitle').value = prompt.title;
-                document.getElementById('promptContent').value = prompt.content;
-                document.getElementById('promptDescription').value = prompt.description;
-                document.getElementById('promptTags').value = prompt.tags.join(' ');
-                document.getElementById('promptCategory').value = prompt.category;
-                document.getElementById('promptPublic').checked = prompt.isPublic;
-                
-                this.showModal('addModal');
-            }
-
-            showLoginModal() {
-                document.getElementById('loginForm').reset();
-                this.showModal('loginModal');
-            }
-
-            showModal(modalId) {
-                const modal = document.getElementById(modalId);
-                modal.style.display = 'block';
-                setTimeout(() => modal.classList.add('show'), 10);
-                document.body.style.overflow = 'hidden';
-            }
-
-            closeModal(modalId) {
-                const modal = document.getElementById(modalId);
-                modal.classList.remove('show');
-                setTimeout(() => {
-                    modal.style.display = 'none';
-                    document.body.style.overflow = 'auto';
-                }, 300);
-                
-                if (modalId === 'addModal') {
-                    currentEditId = null;
-                }
-            }
-
-            closeAllModals() {
-                document.querySelectorAll('.modal').forEach(modal => {
-                    this.closeModal(modal.id);
-                });
-            }
-
-            // Auth Functions
-            toggleAuth() {
-                if (currentUser) {
-                    this.logout();
-                } else {
-                    this.showLoginModal();
-                }
-            }
-
-            logout() {
-                if (confirm('確定要登出嗎？未同步的資料可能會遺失。')) {
-                    currentUser = null;
-                    localStorage.removeItem('prompthub_user');
-                    this.updateUserUI();
-                    this.showNotification('已登出', 'success');
-                }
-            }
-
-            updateUserUI() {
-                const userInfo = document.getElementById('userInfo');
-                const authBtn = document.getElementById('authBtn');
-                
-                if (currentUser) {
-                    userInfo.textContent = `${currentUser.name}${currentUser.premium ? ' ⭐' : ''}`;
-                    authBtn.innerHTML = '🚪 登出';
-                } else {
-                    userInfo.textContent = '訪客模式';
-                    authBtn.innerHTML = '👤 登入';
-                }
-            }
-
-            // Data Management
-            saveDraft() {
-                const formData = {
-                    title: document.getElementById('promptTitle').value,
-                    content: document.getElementById('promptContent').value,
-                    description: document.getElementById('promptDescription').value,
-                    tags: document.getElementById('promptTags').value,
-                    category: document.getElementById('promptCategory').value,
-                    isPublic: document.getElementById('promptPublic').checked
-                };
-                
-                if (Object.values(formData).some(value => value && value.toString().trim())) {
-                    localStorage.setItem('prompthub_draft', JSON.stringify(formData));
-                    this.showNotification('💾 草稿已儲存');
-                }
-            }
-
-            loadDraft() {
-                const draft = localStorage.getItem('prompthub_draft');
-                if (draft && !currentEditId) {
-                    const formData = JSON.parse(draft);
-                    if (confirm('發現未完成的草稿，是否要載入？')) {
-                        document.getElementById('promptTitle').value = formData.title || '';
-                        document.getElementById('promptContent').value = formData.content || '';
-                        document.getElementById('promptDescription').value = formData.description || '';
-                        document.getElementById('promptTags').value = formData.tags || '';
-                        document.getElementById('promptCategory').value = formData.category || 'work';
-                        document.getElementById('promptPublic').checked = formData.isPublic || false;
-                    }
-                }
-            }
-
-            clearDraft() {
-                localStorage.removeItem('prompthub_draft');
-            }
-
-            exportData() {
-                try {
-                    const exportData = {
-                        prompts: prompts,
-                        user: currentUser,
-                        exportDate: new Date().toISOString(),
-                        version: '1.0'
-                    };
-                    
-                    const dataStr = JSON.stringify(exportData, null, 2);
-                    const dataBlob = new Blob([dataStr], { type: 'application/json' });
-                    
-                    const link = document.createElement('a');
-                    link.href = URL.createObjectURL(dataBlob);
-                    link.download = `prompthub_backup_${new Date().toISOString().split('T')[0]}.json`;
-                    link.click();
-                    
-                    this.showNotification('📥 資料匯出成功！', 'success');
-                } catch (error) {
-                    this.showNotification('匯出失敗', 'error');
-                }
-            }
-
-            importData(file) {
-                if (!file) return;
-                
-                const reader = new FileReader();
-                reader.onload = (e) => {
-                    try {
-                        const importedData = JSON.parse(e.target.result);
-                        
-                        if (importedData.prompts && Array.isArray(importedData.prompts)) {
-                            // 合併資料，避免重複
-                            const existingIds = new Set(prompts.map(p => p.id));
-                            const newPrompts = importedData.prompts.filter(p => !existingIds.has(p.id));
-                            
-                            prompts = [...newPrompts, ...prompts];
-                            this.saveToStorage();
-                            this.renderPrompts();
-                            this.showNotification(`📤 成功匯入 ${newPrompts.length} 個 Prompts！`, 'success');
-                        } else {
-                            this.showNotification('檔案格式不正確', 'error');
-                        }
-                    } catch (error) {
-                        this.showNotification('匯入失敗：檔案損壞', 'error');
-                    }
-                };
-                reader.readAsText(file);
-            }
-
-            clearAllData() {
-                if (confirm('⚠️ 這將刪除所有本地資料，包括你的 Prompts、設定和草稿。此操作無法復原，確定要繼續嗎？')) {
-                    if (confirm('最後確認：真的要清除所有資料嗎？建議先匯出備份。')) {
-                        localStorage.clear();
-                        prompts = [];
-                        currentUser = null;
-                        this.updateUserUI();
-                        this.renderPrompts();
-                        this.showNotification('🗑️ 所有資料已清除', 'warning');
-                    }
-                }
-            }
-
-            // Utility Functions
-            updateSyncStatus() {
-                const lastSync = localStorage.getItem('prompthub_last_sync');
-                if (lastSync) {
-                    const syncTime = new Date(parseInt(lastSync));
-                    console.log(`上次同步：${syncTime.toLocaleString()}`);
-                }
-            }
-
-            processSyncQueue() {
-                // 處理離線時累積的操作
-                if (syncQueue.length > 0) {
-                    console.log(`處理 ${syncQueue.length} 個待同步操作`);
-                    syncQueue = [];
-                }
-            }
-
-            showNotification(message, type = 'default') {
-                const notification = document.getElementById('notification');
-                notification.textContent = message;
-                notification.className = `notification ${type}`;
-                notification.classList.add('show');
-                
-                setTimeout(() => {
-                    notification.classList.remove('show');
-                }, 3000);
-            }
-
-            showWelcomeMessage() {
-                setTimeout(() => {
-                    this.showNotification('🎉 歡迎使用 PromptHub！', 'success');
-                }, 500);
-            }
-        }
-
-        // 全域函數 (供 HTML 調用)
-        let app;
-
-        // 初始化應用程式
-        document.addEventListener('DOMContentLoaded', function() {
-            app = new PromptHubApp();
+            </form>
             
-            // 自動儲存草稿
-            ['promptTitle', 'promptContent', 'promptDescription', 'promptTags'].forEach(id => {
-                const element = document.getElementById(id);
-                if (element) {
-                    element.addEventListener('input', () => {
-                        clearTimeout(element.draftTimer);
-                        element.draftTimer = setTimeout(() => app.saveDraft(), 1000);
-                    });
-                }
-            });
-        });
-
-        // 全域輔助函數
-        function showAddModal() { app.showAddModal(); }
-        function closeModal() { app.closeAllModals(); }
-        function closeLoginModal() { app.closeModal('loginModal'); }
-        function closeDataModal() { app.closeModal('dataModal'); }
-        function toggleAuth() { app.toggleAuth(); }
-        function showRegister() { app.showNotification('註冊功能開發中...', 'warning'); }
-        function saveDraft() { app.saveDraft(); }
-        function exportData() { app.exportData(); }
-        function importData(file) { app.importData(file); }
-        function clearAllData() { app.clearAllData(); }
-
-        // 開發者工具
-        window.promptHub = {
-            app: () => app,
-            prompts: () => prompts,
-            user: () => currentUser,
-            addSampleData: () => {
-                // 可以添加更多示例資料用於測試
-                app.showNotification('示例資料功能可在開發階段使用');
-            }
-        };
-
-        console.log('🚀 PromptHub 初始化完成！');
-        console.log('💡 使用 window.promptHub 存取開發者工具');
-    </script>
-</body>
-</html>
+            <div style="text-align
