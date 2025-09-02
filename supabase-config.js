@@ -2,8 +2,8 @@
 // PromptHub Supabase 配置與功能整合
 
 // 🔑 Supabase 配置 - 請替換為你的實際金鑰
-const SUPABASE_URL = 'https://vqjyxmrjnhbthnsapz.supabase.co';
-const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZxanl4bXJqbmhidGhuc2FweiIsInJvbGUiOiJhbm9uIiwiaWF0IjoxNzMzMTEzMzQwLCJleHAiOjIwNDg2ODkzNDB9.y1zhmd9VQtTS9xiRiJ4LQAXKuNgRJupNyVGlS1e1eVg';
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
 // 🌐 動態載入 Supabase 客戶端
 let supabaseClient = null;
